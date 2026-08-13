@@ -457,14 +457,12 @@ export function SettingsView() {
           />
           <div className="relative flex flex-wrap items-center justify-between gap-x-8 gap-y-6">
             <div className="flex min-w-0 items-center gap-6">
-              <div className="size-20 shrink-0 overflow-hidden rounded-2xl shadow-lg shadow-(color:--accent-glow)">
-                <img
-                  src="/logo.png"
-                  alt=""
-                  className="size-full object-contain"
-                  draggable={false}
-                />
-              </div>
+              <img
+                src="/logo.png"
+                alt=""
+                className="size-20 shrink-0 object-contain"
+                draggable={false}
+              />
               <div className="min-w-0">
                 <h2 className="font-display text-3xl font-semibold tracking-tight text-content">
                   Basalt
