@@ -233,12 +233,32 @@ impl Artifact {
 
 impl Library {
     fn to_spec(&self, paths: &Paths) -> Option<DownloadSpec> {
-        if let Some(downloads) = &self.downloads {
-            if let Some(artifact) = &downloads.artifact {
-                return artifact.to_spec(paths);
-            }
+        match &self.downloads {
+            Some(downloads) => downloads.artifact.as_ref()?.to_spec(paths),
+            None if self.natives.is_some() => None,
+            None => self.maven_spec(&self.name, self.sha1.clone(), self.size, paths),
         }
-        let path = maven_path(&self.name)?;
+    }
+
+    fn native_spec(&self, classifier: &str, paths: &Paths) -> Option<DownloadSpec> {
+        match &self.downloads {
+            Some(downloads) => downloads
+                .classifiers
+                .as_ref()?
+                .get(classifier)?
+                .to_spec(paths),
+            None => self.maven_spec(&format!("{}:{classifier}", self.name), None, None, paths),
+        }
+    }
+
+    fn maven_spec(
+        &self,
+        name: &str,
+        sha1: Option<String>,
+        size: Option<u64>,
+        paths: &Paths,
+    ) -> Option<DownloadSpec> {
+        let path = maven_path(name)?;
         let base = self
             .url
             .clone()
@@ -251,9 +271,9 @@ impl Library {
         Some(DownloadSpec {
             url: format!("{base}{path}"),
             dest: paths.libraries().join(&path),
-            sha1: self.sha1.clone(),
+            sha1,
             sha256: None,
-            size: self.size,
+            size,
         })
     }
 }
@@ -311,19 +331,13 @@ impl VersionJson {
                 .map(|e| e.exclude.clone())
                 .unwrap_or_default();
 
-            if let (Some(natives), Some(downloads)) = (&lib.natives, &lib.downloads) {
-                if let Some(template) = natives.get(current_os()) {
-                    let classifier = template.replace("${arch}", arch_bits());
-                    if let Some(classifiers) = &downloads.classifiers {
-                        if let Some(artifact) = classifiers.get(&classifier) {
-                            if let Some(spec) = artifact.to_spec(paths) {
-                                resolved.natives.push(NativeSpec {
-                                    spec,
-                                    exclude: exclude.clone(),
-                                });
-                            }
-                        }
-                    }
+            if let Some(template) = lib.natives.as_ref().and_then(|n| n.get(current_os())) {
+                let classifier = template.replace("${arch}", arch_bits());
+                if let Some(spec) = lib.native_spec(&classifier, paths) {
+                    resolved.natives.push(NativeSpec {
+                        spec,
+                        exclude: exclude.clone(),
+                    });
                 }
             }
 
@@ -481,6 +495,59 @@ mod tests {
         let args = merged.arguments.as_ref().unwrap();
         assert_eq!(args.jvm.len(), 2);
         assert!(merged.downloads.is_some());
+    }
+
+    #[test]
+    fn natives_only_libraries_never_request_the_bare_jar() {
+        let version: VersionJson = serde_json::from_str(
+            r#"{
+                "id": "1.12.2",
+                "mainClass": "net.minecraft.client.main.Main",
+                "type": "release",
+                "libraries": [
+                    {
+                        "name": "net.java.jinput:jinput-platform:2.0.5",
+                        "downloads": {"classifiers": {
+                            "natives-linux": {"path": "net/java/jinput/jinput-platform/2.0.5/jinput-platform-2.0.5-natives-linux.jar", "sha1": "a", "size": 1, "url": "https://libraries.minecraft.net/net/java/jinput/jinput-platform/2.0.5/jinput-platform-2.0.5-natives-linux.jar"},
+                            "natives-osx": {"path": "net/java/jinput/jinput-platform/2.0.5/jinput-platform-2.0.5-natives-osx.jar", "sha1": "b", "size": 1, "url": "https://libraries.minecraft.net/net/java/jinput/jinput-platform/2.0.5/jinput-platform-2.0.5-natives-osx.jar"},
+                            "natives-windows": {"path": "net/java/jinput/jinput-platform/2.0.5/jinput-platform-2.0.5-natives-windows.jar", "sha1": "c", "size": 1, "url": "https://libraries.minecraft.net/net/java/jinput/jinput-platform/2.0.5/jinput-platform-2.0.5-natives-windows.jar"}
+                        }},
+                        "natives": {"linux": "natives-linux", "osx": "natives-osx", "windows": "natives-windows"},
+                        "extract": {"exclude": ["META-INF/"]}
+                    },
+                    {
+                        "name": "org.lwjgl.lwjgl:lwjgl-platform:2.9.1",
+                        "natives": {"linux": "natives-linux", "osx": "natives-osx", "windows": "natives-windows"}
+                    },
+                    {"name": "net.java.jinput:jinput:2.0.5"}
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let paths = Paths::plain(std::path::PathBuf::from("/data"));
+        let resolved = version.resolve_libraries(&paths);
+        let os = current_os();
+
+        let classpath: Vec<&str> = resolved.classpath.iter().map(|s| s.url.as_str()).collect();
+        assert_eq!(
+            classpath,
+            ["https://libraries.minecraft.net/net/java/jinput/jinput/2.0.5/jinput-2.0.5.jar"]
+        );
+
+        let natives: Vec<&str> = resolved
+            .natives
+            .iter()
+            .map(|n| n.spec.url.as_str())
+            .collect();
+        assert_eq!(
+            natives,
+            [
+                format!("https://libraries.minecraft.net/net/java/jinput/jinput-platform/2.0.5/jinput-platform-2.0.5-natives-{os}.jar"),
+                format!("https://libraries.minecraft.net/org/lwjgl/lwjgl/lwjgl-platform/2.9.1/lwjgl-platform-2.9.1-natives-{os}.jar"),
+            ]
+        );
+        assert_eq!(resolved.natives[0].exclude, ["META-INF/"]);
     }
 
     #[test]
