@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Check, Copy, ExternalLink, Loader2, TriangleAlert } from "lucide-react";
+import { Check, Copy, ExternalLink, Link, Loader2, TriangleAlert } from "lucide-react";
 
 import { Button } from "./ui";
 import { Modal, ModalHeader } from "./Modal";
@@ -9,15 +9,16 @@ import { useStore } from "../store";
 export function SignInModal() {
   const auth = useStore((s) => s.auth);
   const resetAuth = useStore((s) => s.resetAuth);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"code" | "link" | null>(null);
 
   const open = auth.status !== "idle";
 
-  const copy = async () => {
-    if (!auth.userCode) return;
-    await navigator.clipboard.writeText(auth.userCode);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+  const copy = async (what: "code" | "link") => {
+    const text = what === "code" ? auth.userCode : auth.verificationUri;
+    if (!text) return;
+    await navigator.clipboard.writeText(text);
+    setCopied(what);
+    setTimeout(() => setCopied(null), 1500);
   };
 
   return (
@@ -49,27 +50,37 @@ export function SignInModal() {
           </p>
 
           <button
-            onClick={copy}
+            onClick={() => copy("code")}
             title="Copy the code"
             className="group mt-4 flex w-full items-center justify-center gap-3 rounded-xl border border-border bg-void px-5 py-4 transition-colors hover:border-(--accent)"
           >
             <span className="font-mono text-2xl font-bold tracking-[0.25em] text-content">
               {auth.userCode}
             </span>
-            {copied ? (
+            {copied === "code" ? (
               <Check className="size-4 text-ok" />
             ) : (
               <Copy className="size-4 text-content-faint group-hover:text-content" />
             )}
           </button>
 
-          <Button
-            className="mt-4 w-full"
-            onClick={() => auth.verificationUri && openUrl(auth.verificationUri)}
-          >
-            <ExternalLink className="size-4" />
-            Open sign-in page
-          </Button>
+          <div className="mt-4 flex gap-2">
+            <Button
+              className="flex-1"
+              onClick={() => auth.verificationUri && openUrl(auth.verificationUri)}
+            >
+              <ExternalLink className="size-4" />
+              Open sign-in page
+            </Button>
+            <Button variant="ghost" onClick={() => copy("link")}>
+              {copied === "link" ? (
+                <Check className="size-4 text-ok" />
+              ) : (
+                <Link className="size-4" />
+              )}
+              {copied === "link" ? "Copied" : "Copy link"}
+            </Button>
+          </div>
 
           <div className="mt-4 flex items-center justify-center gap-2 text-xs text-content-faint">
             <Loader2 className="size-3 animate-spin" />
