@@ -510,8 +510,10 @@ async fn link_curseforge_matches(
     let Ok(matches) = curseforge::match_fingerprints(state, &fingerprints).await else {
         return Ok(HashSet::new());
     };
-    let by_fingerprint: HashMap<u32, &curseforge::FingerprintMatch> =
-        matches.iter().map(|m| (m.id as u32, m)).collect();
+    let by_fingerprint: HashMap<u32, &curseforge::FingerprintMatch> = matches
+        .iter()
+        .map(|m| (m.file.file_fingerprint as u32, m))
+        .collect();
 
     let mod_ids: Vec<String> = matches.iter().map(|m| m.file.mod_id.to_string()).collect();
     let cf_projects = curseforge::resolve_projects(state, &mod_ids)
