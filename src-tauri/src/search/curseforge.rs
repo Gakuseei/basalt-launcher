@@ -713,7 +713,6 @@ struct FingerprintMatches {
 
 #[derive(Deserialize)]
 pub struct FingerprintMatch {
-    pub id: u64,
     pub file: File,
 }
 
@@ -860,7 +859,7 @@ mod tests {
     fn a_fingerprint_match_carries_the_fingerprint_on_its_file() {
         let body = r#"{"id":609977,"file":{"id":5637783,"modId":609977,"fileName":"AE2-Things-1.4.2-beta.jar","fileFingerprint":777740976}}"#;
         let parsed: FingerprintMatch = serde_json::from_str(body).unwrap();
-        assert_eq!(parsed.id, 609977);
+        assert_eq!(parsed.file.mod_id, 609977);
         assert_eq!(parsed.file.file_fingerprint, 777740976);
     }
 }
