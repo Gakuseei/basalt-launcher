@@ -7,9 +7,27 @@ fn main() {
     }
 
     #[cfg(target_os = "linux")]
-    webkit_render_env();
+    {
+        webkit_render_env();
+        leave_appimage_mount();
+    }
 
     basalt_launcher_lib::run()
+}
+
+/**
+ * The AppImage runtime starts us inside its mount, so every file dialog
+ * opened in /tmp/.mount_xxx/usr. Move to the home directory instead.
+ */
+#[cfg(target_os = "linux")]
+fn leave_appimage_mount() {
+    let Some(appdir) = std::env::var_os("APPDIR") else {
+        return;
+    };
+    let inside = std::env::current_dir().is_ok_and(|cwd| cwd.starts_with(&appdir));
+    if let (true, Some(home)) = (inside, std::env::var_os("HOME")) {
+        let _ = std::env::set_current_dir(home);
+    }
 }
 
 /**
