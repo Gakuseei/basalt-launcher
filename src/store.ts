@@ -539,7 +539,13 @@ export const useStore = create<AppStore>((set) => ({
   launching: [],
   logsTab: "launcher",
   media: {},
-  selectedInstanceId: null,
+  selectedInstanceId: (() => {
+    try {
+      return localStorage.getItem("home-instance");
+    } catch {
+      return null;
+    }
+  })(),
   detailInstanceId: null,
   detailServerId: null,
   viewStack: [],
@@ -1106,7 +1112,9 @@ export const useStore = create<AppStore>((set) => ({
           serverConsole,
           ready: true,
           error: null,
-          selectedInstanceId: s.selectedInstanceId ?? instances[0]?.id ?? null,
+          selectedInstanceId: instances.some((i) => i.id === s.selectedInstanceId)
+            ? s.selectedInstanceId
+            : (instances[0]?.id ?? null),
           discoverTargetId: s.discoverTargetId ?? instances[0]?.id ?? null,
           tasks: Object.fromEntries(tasks.map((t) => [t.id, t])),
           taskOrder: tasks.map((t) => t.id),
@@ -1664,6 +1672,16 @@ export const useStore = create<AppStore>((set) => ({
     }
   },
 }));
+
+useStore.subscribe((state, previous) => {
+  if (state.selectedInstanceId === previous.selectedInstanceId) return;
+  try {
+    if (state.selectedInstanceId) localStorage.setItem("home-instance", state.selectedInstanceId);
+    else localStorage.removeItem("home-instance");
+  } catch {
+    return;
+  }
+});
 
 const BROWSE_VIEWS = new Set<View>(["discover", "project"]);
 
