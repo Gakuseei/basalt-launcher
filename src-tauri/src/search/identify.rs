@@ -421,7 +421,7 @@ pub async fn reconcile(
         .collect();
 
     if unlinked.is_empty() {
-        return Ok(());
+        return link_alternates(state, target, content_kind).await;
     }
 
     let curseforge_first: Vec<(String, String, u32)> = unlinked
@@ -440,7 +440,7 @@ pub async fn reconcile(
             link_curseforge_matches(state, target, content_kind, &curseforge_first).await?;
         unlinked.retain(|(name, _, _)| !matched.contains(name));
         if unlinked.is_empty() {
-            return Ok(());
+            return link_alternates(state, target, content_kind).await;
         }
     }
 
@@ -485,12 +485,103 @@ pub async fn reconcile(
         .into_iter()
         .filter(|(name, _, _)| !tried_curseforge.contains(name))
         .collect();
-    if curseforge_fallback.is_empty() {
+    if !curseforge_fallback.is_empty() {
+        link_curseforge_matches(state, target, content_kind, &curseforge_fallback).await?;
+    }
+
+    link_alternates(state, target, content_kind).await
+}
+
+const ALT_RETRY_SECS: i64 = 60 * 60 * 24 * 7;
+
+fn wants_alternate(file: &ContentFile, now: i64) -> bool {
+    if file.provider.is_none() || file.project_id.is_none() {
+        return false;
+    }
+    match file.alt_checked_at {
+        None => true,
+        Some(at) => file.alt_project_id.is_none() && now - at > ALT_RETRY_SECS,
+    }
+}
+
+/**
+ * Every linked file also gets looked up on the other platform so Discover
+ * recognises it there and updates can fall back to it. Misses are stamped and
+ * retried after a week, a missing CurseForge key leaves them unstamped.
+ */
+async fn link_alternates(
+    state: &AppState,
+    target: crate::search::resolve::Target<'_>,
+    content_kind: ContentKind,
+) -> Result<()> {
+    let now = chrono::Utc::now().timestamp();
+    let files: Vec<ContentFile> = target
+        .installed(state, content_kind)
+        .into_iter()
+        .filter(|file| wants_alternate(file, now))
+        .collect();
+    if files.is_empty() {
         return Ok(());
     }
 
-    link_curseforge_matches(state, target, content_kind, &curseforge_fallback).await?;
+    let want_curseforge: Vec<(&str, u32)> = files
+        .iter()
+        .filter(|file| file.provider.as_deref() == Some(Provider::Modrinth.as_str()))
+        .filter_map(|file| Some((file.file_name.as_str(), file.murmur2? as u32)))
+        .collect();
+    if !want_curseforge.is_empty() && curseforge::key(state).is_ok() {
+        let fingerprints: Vec<u32> = want_curseforge.iter().map(|(_, fp)| *fp).collect();
+        if let Ok(matches) = curseforge::match_fingerprints(state, &fingerprints).await {
+            let by_fingerprint: HashMap<u32, &curseforge::FingerprintMatch> = matches
+                .iter()
+                .map(|m| (m.file.file_fingerprint as u32, m))
+                .collect();
+            for (file_name, fingerprint) in want_curseforge {
+                let alt = by_fingerprint
+                    .get(&fingerprint)
+                    .map(|entry| (entry.file.mod_id.to_string(), entry.file.id.to_string()));
+                target.merge_alt_identity(
+                    state,
+                    content_kind,
+                    file_name,
+                    alt.as_ref().map(|(project, version)| {
+                        (
+                            Provider::Curseforge.as_str(),
+                            project.as_str(),
+                            Some(version.as_str()),
+                        )
+                    }),
+                    now,
+                )?;
+            }
+        }
+    }
 
+    let want_modrinth: Vec<(&str, &str)> = files
+        .iter()
+        .filter(|file| file.provider.as_deref() == Some(Provider::Curseforge.as_str()))
+        .filter_map(|file| Some((file.file_name.as_str(), file.sha1.as_deref()?)))
+        .collect();
+    if want_modrinth.is_empty() {
+        return Ok(());
+    }
+    let sha1s: Vec<String> = want_modrinth
+        .iter()
+        .map(|(_, sha1)| sha1.to_string())
+        .collect();
+    let Ok(by_hash) = modrinth::versions_by_hash(state, &sha1s).await else {
+        return Ok(());
+    };
+    for (file_name, sha1) in want_modrinth {
+        let alt = by_hash.get(sha1).map(|version| {
+            (
+                Provider::Modrinth.as_str(),
+                version.project_id.as_str(),
+                Some(version.id.as_str()),
+            )
+        });
+        target.merge_alt_identity(state, content_kind, file_name, alt, now)?;
+    }
     Ok(())
 }
 
@@ -550,7 +641,7 @@ mod tests {
 
     use super::{
         curseforge_fingerprint, curseforge_fingerprint_reader, expected_provider, is_ignored_byte,
-        murmur2, needs_provider_identity,
+        murmur2, needs_provider_identity, wants_alternate, ALT_RETRY_SECS,
     };
     use crate::{db::ContentFile, search::Provider};
 
@@ -587,6 +678,19 @@ mod tests {
             Some(&installed),
             Some(Provider::Curseforge)
         ));
+    }
+
+    #[test]
+    fn only_linked_files_want_an_alternate_and_misses_retry_after_a_week() {
+        let mut file = linked(Provider::Modrinth, "user");
+        assert!(wants_alternate(&file, 100));
+        file.alt_checked_at = Some(100);
+        assert!(!wants_alternate(&file, 100 + ALT_RETRY_SECS));
+        assert!(wants_alternate(&file, 101 + ALT_RETRY_SECS));
+        file.alt_project_id = Some("other".into());
+        assert!(!wants_alternate(&file, 101 + ALT_RETRY_SECS));
+        let unlinked = ContentFile::default();
+        assert!(!wants_alternate(&unlinked, 0));
     }
 
     #[test]
