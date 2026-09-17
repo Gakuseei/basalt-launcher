@@ -408,6 +408,8 @@ export interface ExportCandidate {
   directory: boolean;
   size: number;
   default_selected: boolean;
+  modrinth: number;
+  curseforge: number;
 }
 
 export interface ExportOptions {

@@ -17,15 +17,11 @@ use crate::{
 
 use super::{is_content_path, loader_dependency_key, PackFormat, CONTENT_DIRS};
 
-/** Top-level entries that start checked. Everything else is opt-in. */
-const DEFAULT_SELECTED: [&str; 6] = [
-    "mods",
-    "datapacks",
-    "resourcepacks",
-    "shaderpacks",
-    "config",
-    "schematics",
-];
+/**
+ * Top-level entries that start checked: the mods and the scripts a pack cannot
+ * regenerate on first launch. Configs, packs and personal files are opt-in.
+ */
+const DEFAULT_SELECTED: [&str; 3] = ["mods", "kubejs", "scripts"];
 
 /** Launcher state and caches that never belong in a pack. */
 const NEVER_EXPORTED: [&str; 8] = [
@@ -54,6 +50,9 @@ pub struct ExportCandidate {
     pub directory: bool,
     pub size: u64,
     pub default_selected: bool,
+    /** Linked files inside a content folder, or the link of a single file. */
+    pub modrinth: usize,
+    pub curseforge: usize,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -142,9 +141,35 @@ impl ExportSelection {
     }
 }
 
+fn linked_counts(
+    sources: &[(String, ContentFile)],
+    relative: &str,
+    directory: bool,
+) -> (usize, usize) {
+    let mut modrinth = 0;
+    let mut curseforge = 0;
+    for (kind, source) in sources {
+        let matches = if directory {
+            kind == relative
+        } else {
+            relative == format!("{kind}/{}", source.file_name)
+        };
+        if !matches {
+            continue;
+        }
+        match source.provider.as_deref() {
+            Some("modrinth") => modrinth += 1,
+            Some("curseforge") => curseforge += 1,
+            _ => {}
+        }
+    }
+    (modrinth, curseforge)
+}
+
 pub fn export_candidates(
     files: &FileManager,
     instance: &Instance,
+    sources: &[(String, ContentFile)],
     parent: Option<&str>,
 ) -> Result<Vec<ExportCandidate>> {
     let root = PathBuf::from(&instance.dir);
@@ -170,6 +195,7 @@ pub fn export_candidates(
             continue;
         }
         let default_selected = DEFAULT_SELECTED.contains(&first_segment(&relative));
+        let (modrinth, curseforge) = linked_counts(sources, &relative, metadata.is_dir());
         found.push(ExportCandidate {
             path: relative,
             directory: metadata.is_dir(),
@@ -179,6 +205,8 @@ pub fn export_candidates(
                 0
             },
             default_selected,
+            modrinth,
+            curseforge,
         });
     }
     found.sort_by(|a, b| {
@@ -646,21 +674,32 @@ mod tests {
     #[test]
     fn candidates_list_the_instance_root_with_defaults_and_hide_launcher_state() {
         let (base, files, instance) = fake_instance();
-        let root = export_candidates(&files, &instance, None).unwrap();
+        let sources = vec![(
+            "mods".to_string(),
+            crate::db::ContentFile {
+                file_name: "sodium.jar".into(),
+                provider: Some("modrinth".into()),
+                ..Default::default()
+            },
+        )];
+        let root = export_candidates(&files, &instance, &sources, None).unwrap();
         let by_path: std::collections::HashMap<_, _> =
             root.iter().map(|c| (c.path.as_str(), c)).collect();
         assert!(by_path["mods"].default_selected && by_path["mods"].directory);
-        assert!(by_path["config"].default_selected);
+        assert_eq!(by_path["mods"].modrinth, 1);
+        assert!(!by_path["config"].default_selected);
         assert!(!by_path["options.txt"].default_selected);
         assert!(!by_path["saves"].default_selected);
         assert!(!by_path.contains_key("logs"));
         assert!(!by_path.contains_key(".basalt"));
-        let nested = export_candidates(&files, &instance, Some("config")).unwrap();
+        let nested = export_candidates(&files, &instance, &sources, Some("config")).unwrap();
         assert_eq!(
             nested.iter().map(|c| c.path.as_str()).collect::<Vec<_>>(),
             ["config/private", "config/sodium.json"]
         );
-        assert!(export_candidates(&files, &instance, Some("../"))
+        let mods = export_candidates(&files, &instance, &sources, Some("mods")).unwrap();
+        assert_eq!(mods[0].modrinth, 1);
+        assert!(export_candidates(&files, &instance, &sources, Some("../"))
             .unwrap()
             .is_empty());
         std::fs::remove_dir_all(base).unwrap();

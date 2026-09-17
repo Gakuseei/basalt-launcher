@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { ChevronRight, File, Folder, Loader2 } from "lucide-react";
+import { Check, ChevronRight, File, Folder, Loader2, Minus } from "lucide-react";
 
 import { api } from "../lib/api";
 import { cn } from "../lib/cn";
 import { formatBytes } from "../lib/format";
-import type { ExportCandidate } from "../lib/types";
+import type { ExportCandidate, PackFormat } from "../lib/types";
 
 export interface ExportRules {
   included: string[];
@@ -49,16 +49,22 @@ export function toggle(rules: ExportRules, path: string, selected: boolean): Exp
     : { included, excluded: [...excluded, path] };
 }
 
+function linkedCount(item: ExportCandidate, format: PackFormat) {
+  return format === "mrpack" ? item.modrinth : item.curseforge;
+}
+
 function Row({
   item,
   depth,
   rules,
+  format,
   onToggle,
   instanceId,
 }: {
   item: ExportCandidate;
   depth: number;
   rules: ExportRules;
+  format: PackFormat;
   onToggle: (path: string, selected: boolean) => void;
   instanceId: string;
 }) {
@@ -67,6 +73,8 @@ function Row({
   const [loading, setLoading] = useState(false);
   const selected = resolveSelected(rules, item.path);
   const mixed = item.directory && hasRulesBelow(rules, item.path, !selected);
+  const linked = linkedCount(item, format);
+  const lit = selected || mixed;
 
   const expand = useCallback(async () => {
     if (!item.directory) return;
@@ -83,20 +91,35 @@ function Row({
   }, [children, instanceId, item.directory, item.path]);
 
   const name = item.path.slice(item.path.lastIndexOf("/") + 1);
+  const Glyph = item.directory ? Folder : File;
 
   return (
     <>
       <div
+        role="checkbox"
+        aria-checked={mixed ? "mixed" : selected}
+        tabIndex={0}
+        onClick={() => onToggle(item.path, !selected)}
+        onKeyDown={(event) => {
+          if (event.key === " " || event.key === "Enter") {
+            event.preventDefault();
+            onToggle(item.path, !selected);
+          }
+        }}
         className={cn(
-          "flex items-center gap-2 rounded-lg py-1 pr-2 text-sm transition-colors hover:bg-surface-2",
-          !selected && !mixed && "text-content-faint",
+          "flex cursor-pointer select-none items-center gap-2 rounded-lg py-1.5 pr-2.5 text-[13px] outline-none transition-colors hover:bg-surface-2 focus-visible:ring-1 focus-visible:ring-(--accent)",
+          lit ? "text-content" : "text-content-faint",
         )}
-        style={{ paddingLeft: 8 + depth * 18 }}
+        style={{ paddingLeft: 6 + depth * 18 }}
       >
         <button
-          onClick={() => void expand()}
+          onClick={(event) => {
+            event.stopPropagation();
+            void expand();
+          }}
           disabled={!item.directory}
-          className="grid size-5 shrink-0 place-items-center text-content-faint disabled:invisible"
+          tabIndex={-1}
+          className="grid size-5 shrink-0 place-items-center rounded text-content-faint transition-colors hover:text-content disabled:invisible"
           aria-label={open ? "Collapse" : "Expand"}
         >
           {loading ? (
@@ -105,25 +128,38 @@ function Row({
             <ChevronRight className={cn("size-3 transition-transform", open && "rotate-90")} />
           )}
         </button>
-        <input
-          type="checkbox"
-          checked={selected}
-          ref={(node) => {
-            if (node) node.indeterminate = mixed;
-          }}
-          onChange={(event) => onToggle(item.path, event.target.checked)}
-          className="size-4 shrink-0 accent-(--accent)"
+        <span
+          className={cn(
+            "grid size-[15px] shrink-0 place-items-center rounded-[4px] border transition-colors",
+            selected
+              ? "border-(--accent) bg-(--accent) text-void"
+              : mixed
+                ? "border-(--accent) bg-surface-2 text-(--accent)"
+                : "border-border bg-surface-2",
+          )}
+        >
+          {selected && <Check className="size-2.5" strokeWidth={3.5} />}
+          {!selected && mixed && <Minus className="size-2.5" strokeWidth={3.5} />}
+        </span>
+        <Glyph
+          className={cn("size-3.5 shrink-0", lit ? "text-content-muted" : "text-content-faint/60")}
         />
-        {item.directory ? (
-          <Folder className="size-3.5 shrink-0 text-content-faint" />
-        ) : (
-          <File className="size-3.5 shrink-0 text-content-faint" />
-        )}
         <span className="min-w-0 flex-1 truncate">{name}</span>
-        {!item.directory && (
-          <span className="shrink-0 font-mono text-[10px] text-content-faint">
-            {formatBytes(item.size)}
+        {linked > 0 ? (
+          <span
+            className={cn(
+              "shrink-0 font-mono text-[10px]",
+              lit ? "text-ok" : "text-content-faint",
+            )}
+          >
+            {item.directory ? `${linked} by link` : "by link"}
           </span>
+        ) : (
+          !item.directory && (
+            <span className="shrink-0 font-mono text-[10px] text-content-faint">
+              {formatBytes(item.size)}
+            </span>
+          )
         )}
       </div>
       {open &&
@@ -133,6 +169,7 @@ function Row({
             item={child}
             depth={depth + 1}
             rules={rules}
+            format={format}
             onToggle={onToggle}
             instanceId={instanceId}
           />
@@ -140,7 +177,7 @@ function Row({
       {open && children?.length === 0 && !loading && (
         <div
           className="py-1 text-[11px] text-content-faint"
-          style={{ paddingLeft: 8 + (depth + 1) * 18 + 28 }}
+          style={{ paddingLeft: 6 + (depth + 1) * 18 + 28 }}
         >
           Empty
         </div>
@@ -149,13 +186,22 @@ function Row({
   );
 }
 
+export function defaultRules(root: ExportCandidate[]): ExportRules {
+  return {
+    included: root.filter((item) => item.default_selected).map((item) => item.path),
+    excluded: [],
+  };
+}
+
 export function ExportFileTree({
   instanceId,
+  format,
   rules,
   onRulesChange,
   onLoaded,
 }: {
   instanceId: string;
+  format: PackFormat;
   rules: ExportRules;
   onRulesChange: (rules: ExportRules) => void;
   onLoaded: (root: ExportCandidate[]) => void;
@@ -178,28 +224,53 @@ export function ExportFileTree({
     };
   }, [instanceId, onLoaded]);
 
-  if (root === null) {
-    return (
-      <div className="flex items-center justify-center py-8 text-content-faint">
-        <Loader2 className="size-4 animate-spin" />
-      </div>
-    );
-  }
+  const chosen = root?.filter((item) => resolveSelected(rules, item.path)) ?? [];
+  const folders = chosen.filter((item) => item.directory).length;
+  const files = chosen.length - folders;
+  const summary = [
+    folders > 0 && `${folders} ${folders === 1 ? "folder" : "folders"}`,
+    files > 0 && `${files} ${files === 1 ? "file" : "files"}`,
+  ]
+    .filter(Boolean)
+    .join(", ");
 
   return (
-    <div className="max-h-64 overflow-y-auto rounded-xl border border-border-soft bg-void/40 py-1">
-      {root.map((item) => (
-        <Row
-          key={item.path}
-          item={item}
-          depth={0}
-          rules={rules}
-          onToggle={(path, selected) => onRulesChange(toggle(rules, path, selected))}
-          instanceId={instanceId}
-        />
-      ))}
-      {root.length === 0 && (
-        <div className="py-6 text-center text-xs text-content-faint">Nothing to export.</div>
+    <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border-soft bg-void/40">
+      <div className="flex items-center gap-2.5 border-b border-border-soft px-3 py-2">
+        <span className="font-pixel text-[9px] tracking-[0.14em] text-content-faint uppercase">
+          What travels
+        </span>
+        <span className="text-[11px] text-content-muted">{summary || "Nothing yet"}</span>
+        {root && (
+          <button
+            onClick={() => onRulesChange(defaultRules(root))}
+            className="ml-auto text-[11px] text-content-faint transition-colors hover:text-content"
+          >
+            Reset to defaults
+          </button>
+        )}
+      </div>
+      {root === null ? (
+        <div className="flex items-center justify-center py-10 text-content-faint">
+          <Loader2 className="size-4 animate-spin" />
+        </div>
+      ) : (
+        <div className="max-h-[42vh] min-h-48 overflow-y-auto p-1.5">
+          {root.map((item) => (
+            <Row
+              key={item.path}
+              item={item}
+              depth={0}
+              rules={rules}
+              format={format}
+              onToggle={(path, selected) => onRulesChange(toggle(rules, path, selected))}
+              instanceId={instanceId}
+            />
+          ))}
+          {root.length === 0 && (
+            <div className="py-6 text-center text-xs text-content-faint">Nothing to export.</div>
+          )}
+        </div>
       )}
     </div>
   );

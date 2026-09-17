@@ -30,3 +30,4 @@ docs/*.md
 devenv.*
 /result
 .playwright/
+.superpowers/

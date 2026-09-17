@@ -17,13 +17,13 @@ export const PACK_FORMATS: Array<{
     id: "mrpack",
     label: "Modrinth",
     extension: "mrpack",
-    note: "Modrinth mods are listed by download link, everything else travels inside the file.",
+    note: "Mods Modrinth knows go by link, everything else is packed inside.",
   },
   {
     id: "curseforge",
     label: "CurseForge",
     extension: "zip",
-    note: "CurseForge mods are listed by project, everything else travels inside the file.",
+    note: "Mods CurseForge knows go by project id, everything else is packed inside.",
   },
 ];
 

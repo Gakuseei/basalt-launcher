@@ -114,7 +114,13 @@ pub fn list_export_candidates(
     parent: Option<String>,
 ) -> Result<Vec<packs::ExportCandidate>> {
     let instance = find_instance(&state, &instance_id)?;
-    packs::export_candidates(&state.files, &instance, parent.as_deref())
+    let mut sources = Vec::new();
+    for kind in packs::CONTENT_DIRS {
+        for file in state.db.content_files(&instance.id, kind)? {
+            sources.push((kind.to_string(), file));
+        }
+    }
+    packs::export_candidates(&state.files, &instance, &sources, parent.as_deref())
 }
 
 #[tauri::command]

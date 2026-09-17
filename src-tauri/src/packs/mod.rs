@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 
-const CONTENT_DIRS: [&str; 4] = ["mods", "resourcepacks", "shaderpacks", "schematics"];
+pub const CONTENT_DIRS: [&str; 4] = ["mods", "resourcepacks", "shaderpacks", "schematics"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
