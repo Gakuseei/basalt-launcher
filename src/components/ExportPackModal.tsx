@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { motion } from "motion/react";
 import { Check, FolderOpen, Loader2, Share, TriangleAlert } from "lucide-react";
@@ -7,8 +7,43 @@ import { api } from "../lib/api";
 import { cn } from "../lib/cn";
 import { formatBytes } from "../lib/format";
 import { PACK_FORMATS, pickPackDestination } from "../lib/packs";
-import type { Instance, PackExport, PackFormat } from "../lib/types";
+import type { ExportCandidate, Instance, PackExport, PackFormat } from "../lib/types";
+import { ExportFileTree, type ExportRules } from "./ExportFileTree";
 import { Modal, ModalFooter, ModalHeader } from "./Modal";
+
+const inputCls =
+  "w-full rounded-lg border border-border bg-void px-3 py-2 text-sm text-content outline-none transition-colors focus:border-(--accent)";
+
+function rulesKey(instanceId: string) {
+  return `export-rules:${instanceId}`;
+}
+
+function loadRules(instanceId: string): ExportRules | null {
+  try {
+    const raw = localStorage.getItem(rulesKey(instanceId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<ExportRules>;
+    const strings = (list: unknown) =>
+      Array.isArray(list) ? list.filter((v): v is string => typeof v === "string") : [];
+    return { included: strings(parsed.included), excluded: strings(parsed.excluded) };
+  } catch {
+    return null;
+  }
+}
+
+function saveRules(instanceId: string, rules: ExportRules) {
+  try {
+    localStorage.setItem(rulesKey(instanceId), JSON.stringify(rules));
+  } catch {
+    return;
+  }
+}
+
+function todayStamp() {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}.${pad(now.getMonth() + 1)}.${pad(now.getDate())}`;
+}
 
 export function ExportPackModal({
   instance,
@@ -21,24 +56,60 @@ export function ExportPackModal({
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<PackExport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [version, setVersion] = useState("");
+  const [description, setDescription] = useState("");
+  const [rules, setRules] = useState<ExportRules | null>(null);
 
   useEffect(() => {
     if (instance) {
       setFormat("mrpack");
       setResult(null);
       setError(null);
+      setName(instance.name);
+      setVersion(todayStamp());
+      setDescription("");
+      setRules(loadRules(instance.id));
     }
   }, [instance]);
+
+  const instanceId = instance?.id ?? null;
+  const onTreeLoaded = useCallback(
+    (root: ExportCandidate[]) => {
+      if (!instanceId) return;
+      setRules(
+        (current) =>
+          current ?? {
+            included: root.filter((item) => item.default_selected).map((item) => item.path),
+            excluded: [],
+          },
+      );
+    },
+    [instanceId],
+  );
+
+  const changeRules = (next: ExportRules) => {
+    setRules(next);
+    if (instance) saveRules(instance.id, next);
+  };
 
   const submit = async () => {
     if (!instance) return;
     setError(null);
     try {
-      const suggested = await api.packExportName(instance.name, format);
+      const suggested = await api.packExportName(name.trim() || instance.name, format);
       const destination = await pickPackDestination(suggested, format);
       if (!destination) return;
       setBusy(true);
-      setResult(await api.exportInstancePack(instance.id, format, destination));
+      setResult(
+        await api.exportInstancePack(instance.id, format, destination, {
+          name: name.trim() || null,
+          version: version.trim() || null,
+          description: description.trim() || null,
+          included: rules?.included ?? [],
+          excluded: rules?.excluded ?? [],
+        }),
+      );
     } catch (cause) {
       setError(String(cause));
     } finally {
@@ -52,7 +123,7 @@ export function ExportPackModal({
     <Modal
       open={!!instance}
       onClose={onClose}
-      size="lg"
+      size="xl"
       dismissable={!busy}
       labelledBy="export-pack-title"
     >
@@ -68,7 +139,7 @@ export function ExportPackModal({
         onClose={busy ? undefined : onClose}
       />
 
-      <div className="flex flex-col gap-4 px-5 py-5">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-5">
         {result ? (
           <div className="flex flex-col items-center gap-5 py-4 text-center">
             <motion.span
@@ -134,11 +205,53 @@ export function ExportPackModal({
               ))}
             </div>
 
-            <p className="text-[11px] text-content-faint">
-              Worlds, logs, screenshots and backups stay out of the file. Anything a{" "}
-              {active?.label} link cannot describe travels inside it, so configs and local mods
-              come along.
-            </p>
+            <div className="grid grid-cols-[1fr_140px] gap-3">
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] font-medium text-content-muted">Name</span>
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder={instance?.name}
+                  className={inputCls}
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] font-medium text-content-muted">Version</span>
+                <input
+                  value={version}
+                  onChange={(e) => setVersion(e.target.value)}
+                  placeholder="1.0.0"
+                  className={cn(inputCls, "font-mono")}
+                />
+              </label>
+              {format === "mrpack" && (
+                <label className="col-span-2 flex flex-col gap-1">
+                  <span className="text-[11px] font-medium text-content-muted">Description</span>
+                  <input
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="Optional summary shown by launchers"
+                    className={inputCls}
+                  />
+                </label>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[11px] font-medium text-content-muted">Files to include</span>
+              {instance && (
+                <ExportFileTree
+                  instanceId={instance.id}
+                  rules={rules ?? { included: [], excluded: [] }}
+                  onRulesChange={changeRules}
+                  onLoaded={onTreeLoaded}
+                />
+              )}
+              <p className="text-[11px] text-content-faint">
+                Checked {active?.label} mods are listed by link, everything else checked travels
+                inside the file. Logs, crash reports and launcher state never do.
+              </p>
+            </div>
           </>
         )}
 
