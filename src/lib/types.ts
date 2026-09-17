@@ -403,6 +403,23 @@ export interface PackExport {
   bytes: number;
 }
 
+export interface ExportCandidate {
+  path: string;
+  directory: boolean;
+  size: number;
+  default_selected: boolean;
+  modrinth: number;
+  curseforge: number;
+}
+
+export interface ExportOptions {
+  name: string | null;
+  version: string | null;
+  description: string | null;
+  included: string[];
+  excluded: string[];
+}
+
 export type TaskKind =
   | "game_install"
   | "java_install"
