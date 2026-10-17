@@ -29,5 +29,3 @@ docs/*.md
 .envrc
 devenv.*
 /result
-.playwright/
-.superpowers/
