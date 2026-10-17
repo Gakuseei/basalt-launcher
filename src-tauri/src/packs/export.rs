@@ -702,6 +702,7 @@ mod tests {
         assert!(export_candidates(&files, &instance, &sources, Some("../"))
             .unwrap()
             .is_empty());
+        drop(files);
         std::fs::remove_dir_all(base).unwrap();
     }
 
@@ -742,6 +743,7 @@ mod tests {
         assert!(index.contains("\"versionId\": \"1.0.2\""));
         assert!(index.contains("\"summary\": \"friends pack\""));
         assert!(index.contains("\"neoforge\": \"21.1.248\""));
+        drop(files);
         std::fs::remove_dir_all(base).unwrap();
     }
 
@@ -777,6 +779,7 @@ mod tests {
         assert!(!names.contains("overrides/mods/sodium.jar"));
         assert!(index.contains("cdn.modrinth.com/data/AANobbMI/versions/v1/sodium.jar"));
         assert!(index.contains("\"sha512\": \""));
+        drop(files);
         std::fs::remove_dir_all(base).unwrap();
     }
 
@@ -800,6 +803,7 @@ mod tests {
         assert!(index.contains("\"name\": \"Main Ding\""));
         assert!(index.contains("\"versionId\": \"2026.09.17\""));
         assert!(!index.contains("summary"));
+        drop(files);
         std::fs::remove_dir_all(base).unwrap();
     }
 

@@ -803,7 +803,6 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "linux")]
-    #[cfg(target_os = "linux")]
     fn a_locally_built_appimage_never_pulls_release_builds() {
         let local = linux_install_source("source", true, false, false, false, false, false);
         assert_eq!(local.id, "appimage");
@@ -811,6 +810,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn linux_appimage_is_self_managed() {
         let source = linux_install_source("linux_bundle", true, false, false, false, false, false);
         assert_eq!(source.id, "appimage");
