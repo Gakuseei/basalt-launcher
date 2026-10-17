@@ -19,10 +19,10 @@ fn is_ignored_byte(byte: u8) -> bool {
 
 pub fn murmur2(data: &[u8], seed: u32) -> u32 {
     let mut hash = seed ^ (data.len() as u32);
-    let mut chunks = data.chunks_exact(4);
+    let (chunks, tail) = data.as_chunks::<4>();
 
-    for chunk in chunks.by_ref() {
-        let mut k = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+    for chunk in chunks {
+        let mut k = u32::from_le_bytes(*chunk);
         k = k.wrapping_mul(MURMUR_M);
         k ^= k >> MURMUR_R;
         k = k.wrapping_mul(MURMUR_M);
@@ -30,7 +30,6 @@ pub fn murmur2(data: &[u8], seed: u32) -> u32 {
         hash ^= k;
     }
 
-    let tail = chunks.remainder();
     if !tail.is_empty() {
         if tail.len() >= 3 {
             hash ^= (tail[2] as u32) << 16;
